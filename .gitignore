@@ -1,0 +1,32 @@
+# Binaries
+/bin/
+/build/
+/dist/
+
+# Go build files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Coverage
+*.out
+
+# Dependency directories (rarely used now, but safe)
+vendor/
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Terraform (you learned this the hard way)
+.terraform/
+*.tfstate
+*.tfstate.backup
