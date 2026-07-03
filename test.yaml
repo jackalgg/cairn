@@ -3,15 +3,15 @@ kind: Deployment
 metadata:
   name: insecure-app
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: insecure
-  template:
+replicas: 1
+selector:
+        matchLabels:
+          app: insecure
+            template:
     metadata:
       labels:
         app: insecure
-    spec:
+     spec:
       containers:
       - name: app
         image: nginx:latest

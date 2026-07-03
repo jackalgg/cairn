@@ -12,15 +12,22 @@ import (
 
 var scanCmd = &cobra.Command{
 	Use:   "scan [path]",
-	Short: "Scan Kubernetes YAML for misconfigurations",
-	Args:  cobra.ExactArgs(1),
+	Short: "Scan any YAML for syntax and configuration issues",
+	Long: `Scan a YAML file, directory, or stdin for the common mistakes that keep
+manifests from loading: tab indentation, inconsistent indentation, missing list
+markers, and keys missing the space after a colon.
+
+Documents that are Kubernetes resources (carry apiVersion and kind) are also
+checked for policy issues, deprecated APIs, and, with --schema, schema
+validity. Plain YAML is checked for syntax only.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		if ctx == nil {
 			ctx = context.Background()
 		}
 
-		eng, err := newEngine(ctx, true, true, true)
+		eng, err := newEngine(ctx, schemaValidation, true, true)
 		if err != nil {
 			return err
 		}

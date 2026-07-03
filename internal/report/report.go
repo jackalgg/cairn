@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackalgg/cairn/internal/model"
+	"sigs.k8s.io/yaml"
 )
 
 type Format string
@@ -27,6 +28,7 @@ type jsonFinding struct {
 	Severity     string `json:"severity"`
 	DocIndex     int    `json:"docIndex"`
 	SourceFile   string `json:"sourceFile"`
+	Line         int    `json:"line,omitempty"`
 	HasFix       bool   `json:"hasFix"`
 }
 
@@ -61,19 +63,26 @@ func writeHuman(w io.Writer, result *model.ScanResult) error {
 	order := sortedFindings(result.Findings)
 	for _, f := range order {
 		fixable := ""
-		if f.HasFix() {
+		if f.CanRepair() {
 			fixable = " [fixable]"
 		}
-		fmt.Fprintf(w, "%s %s %s/%s %s\n  %s%s\n  path: %s\n  file: %s (doc %d)\n\n",
+		location := f.SourceFile
+		if f.Line > 0 {
+			location = fmt.Sprintf("%s:%d", f.SourceFile, f.Line)
+		}
+		resource := fmt.Sprintf("%s/%s", f.GVKString, f.ResourceName)
+		if f.GVKString == "" && f.ResourceName == "" {
+			resource = ""
+		}
+		fmt.Fprintf(w, "%s %s %s %s\n  %s%s\n  path: %s\n  file: %s (doc %d)\n\n",
 			strings.ToUpper(string(f.Severity)),
 			f.RuleID,
-			f.GVKString,
-			f.ResourceName,
+			resource,
 			f.Source,
 			f.Message,
 			fixable,
 			f.Path,
-			f.SourceFile,
+			location,
 			f.DocIndex,
 		)
 	}
@@ -104,7 +113,8 @@ func writeJSON(w io.Writer, result *model.ScanResult) error {
 			Severity:     string(f.Severity),
 			DocIndex:     f.DocIndex,
 			SourceFile:   f.SourceFile,
-			HasFix:       f.HasFix(),
+			Line:         f.Line,
+			HasFix:       f.CanRepair(),
 		})
 	}
 	enc := json.NewEncoder(w)
@@ -135,7 +145,7 @@ func countFindings(findings []model.Finding) (errors, warnings, fixable int) {
 		case model.SeverityWarning:
 			warnings++
 		}
-		if f.HasFix() {
+		if f.CanRepair() {
 			fixable++
 		}
 	}
@@ -149,4 +159,15 @@ func PrintFixDiffs(w io.Writer, diffs []string) {
 		}
 		fmt.Fprintln(w, d)
 	}
+}
+
+func WriteDocument(w io.Writer, doc model.Document) error {
+	data, err := yaml.Marshal(doc.Object.Object)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "---\n%s", data); err != nil {
+		return err
+	}
+	return nil
 }

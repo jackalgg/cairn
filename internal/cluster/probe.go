@@ -2,36 +2,43 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jackalgg/cairn/internal/model"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-type Info struct {
-	ServerVersion string
-}
-
 type Probe struct {
-	info *Info
+	client *Client
 }
 
 func NewProbe(kubeconfig, contextName string) (*Probe, error) {
-	config, err := loadConfig(kubeconfig, contextName)
+	client, err := NewClient(kubeconfig, contextName)
 	if err != nil {
 		return nil, err
 	}
-	client, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return nil, err
+	return &Probe{client: client}, nil
+}
+
+func (p *Probe) EnrichFindings(ctx context.Context, findings []model.Finding) []model.Finding {
+	if p == nil || p.client == nil {
+		return findings
 	}
-	version, err := client.ServerVersion()
-	if err != nil {
-		return nil, fmt.Errorf("cluster probe: %w", err)
+	return p.client.EnrichFindings(ctx, findings)
+}
+
+func (p *Probe) ServerVersion() string {
+	if p == nil || p.client == nil {
+		return ""
 	}
-	return &Probe{info: &Info{ServerVersion: version.GitVersion}}, nil
+	return p.client.ServerVersion()
+}
+
+func (p *Probe) Client() *Client {
+	if p == nil {
+		return nil
+	}
+	return p.client
 }
 
 func loadConfig(kubeconfig, contextName string) (*rest.Config, error) {
@@ -44,25 +51,4 @@ func loadConfig(kubeconfig, contextName string) (*rest.Config, error) {
 		configOverrides.CurrentContext = contextName
 	}
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides).ClientConfig()
-}
-
-func (p *Probe) EnrichFindings(ctx context.Context, findings []model.Finding) []model.Finding {
-	if p == nil || p.info == nil {
-		return findings
-	}
-	for i := range findings {
-		if findings[i].Severity == model.SeverityWarning && findings[i].Source == model.SourcePolicy {
-			if findings[i].RuleID == "pss-run-as-non-root" || findings[i].RuleID == "pss-read-only-rootfs" {
-				findings[i].Message = fmt.Sprintf("%s (cluster %s may enforce Pod Security Standards)", findings[i].Message, p.info.ServerVersion)
-			}
-		}
-	}
-	return findings
-}
-
-func (p *Probe) ServerVersion() string {
-	if p == nil || p.info == nil {
-		return ""
-	}
-	return p.info.ServerVersion
 }

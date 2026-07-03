@@ -29,7 +29,7 @@ func TestFindingsFromError(t *testing.T) {
 		t.Fatalf("ParseFile: %v", err)
 	}
 	text := `must runAsNonRoot`
-	findings := FindingsFromError(docs[0], text)
+	findings := FindingsFromError(docs[0], text, "1.30")
 	if len(findings) == 0 {
 		t.Fatal("expected findings from error text")
 	}

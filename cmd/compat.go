@@ -11,6 +11,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	compatDryRun  bool
+	compatOut     string
+	compatInPlace bool
+)
+
 var compatCmd = &cobra.Command{
 	Use:   "compat [path]",
 	Short: "Check and fix API version compatibility for target Kubernetes version",
@@ -44,15 +50,16 @@ var compatCmd = &cobra.Command{
 		}
 
 		fileResults, err := fixer.Apply(result, findings, fixer.Options{
-			DryRun: compatDryRun,
-			OutDir: compatOut,
+			DryRun:  compatDryRun,
+			OutDir:  compatOut,
+			InPlace: compatInPlace,
 		})
 		if err != nil {
 			return err
 		}
 
 		for _, fr := range fileResults {
-			if compatDryRun || compatOut != "" {
+			if compatDryRun || compatOut != "" || !compatInPlace {
 				fmt.Print(fr.Diff)
 			}
 			if fr.Written {
@@ -64,20 +71,20 @@ var compatCmd = &cobra.Command{
 			return nil
 		}
 
-		if engine.HasErrors(result.Findings) {
+		remaining, err := eng.ScanPath(ctx, args[0])
+		if err != nil {
+			return err
+		}
+		if engine.HasErrors(remaining.Findings) {
 			return fmt.Errorf("compatibility issues remain")
 		}
 		return nil
 	},
 }
 
-var (
-	compatDryRun bool
-	compatOut    string
-)
-
 func init() {
 	compatCmd.Flags().BoolVar(&compatDryRun, "dry-run", false, "Show diff without writing files")
 	compatCmd.Flags().StringVar(&compatOut, "out", "", "Write migrated manifests to directory")
+	compatCmd.Flags().BoolVar(&compatInPlace, "in-place", false, "Overwrite source files in place")
 	rootCmd.AddCommand(compatCmd)
 }

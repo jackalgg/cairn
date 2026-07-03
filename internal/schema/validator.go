@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackalgg/cairn/internal/model"
+	"github.com/jackalgg/cairn/internal/repair/schemafix"
 	"github.com/yannh/kubeconform/pkg/validator"
 )
 
@@ -36,7 +37,7 @@ func (s *Validator) ValidateDocument(ctx context.Context, doc model.Document) []
 			continue
 		}
 		if res.Status == validator.Error {
-			findings = append(findings, model.Finding{
+			findings = append(findings, schemafix.EnrichFinding(doc, model.Finding{
 				RuleID:       "schema-error",
 				Message:      fmt.Sprintf("schema validation error: %v", res.Err),
 				Path:         "",
@@ -47,12 +48,13 @@ func (s *Validator) ValidateDocument(ctx context.Context, doc model.Document) []
 				Severity:     model.SeverityError,
 				DocIndex:     doc.Index,
 				SourceFile:   doc.Source,
-			})
+			}))
 			continue
 		}
 		for _, ve := range res.ValidationErrors {
-			findings = append(findings, model.Finding{
-				RuleID:       "schema-validation",
+			ruleID := schemafix.ClassifyMessage(ve.Msg)
+			findings = append(findings, schemafix.EnrichFinding(doc, model.Finding{
+				RuleID:       ruleID,
 				Message:      ve.Msg,
 				Path:         ve.Path,
 				GVK:          doc.GVK,
@@ -62,10 +64,10 @@ func (s *Validator) ValidateDocument(ctx context.Context, doc model.Document) []
 				Severity:     model.SeverityError,
 				DocIndex:     doc.Index,
 				SourceFile:   doc.Source,
-			})
+			}))
 		}
 		if len(res.ValidationErrors) == 0 && res.Err != nil {
-			findings = append(findings, model.Finding{
+			findings = append(findings, schemafix.EnrichFinding(doc, model.Finding{
 				RuleID:       "schema-validation",
 				Message:      res.Err.Error(),
 				Path:         "",
@@ -76,7 +78,7 @@ func (s *Validator) ValidateDocument(ctx context.Context, doc model.Document) []
 				Severity:     model.SeverityError,
 				DocIndex:     doc.Index,
 				SourceFile:   doc.Source,
-			})
+			}))
 		}
 	}
 	return findings

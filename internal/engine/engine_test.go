@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackalgg/cairn/internal/model"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestScanPath_testYAML(t *testing.T) {
@@ -48,6 +49,46 @@ func TestScanPath_testYAML(t *testing.T) {
 	}
 }
 
+func TestScanReportsSyntaxFindingsForBrokenYAML(t *testing.T) {
+	ctx := context.Background()
+	eng, err := New(Options{SchemaValidation: false, PolicyChecks: false, CompatChecks: false, MinSeverity: "warning"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Tab indentation breaks parsing; the syntax layer should surface it.
+	result, err := eng.ScanBytes(ctx, "broken.yaml", []byte("metadata:\n\tname: x\n baz: y\n"))
+	if err != nil {
+		t.Fatalf("ScanBytes: %v", err)
+	}
+	if len(result.Findings) == 0 {
+		t.Fatal("expected syntax findings for broken YAML")
+	}
+	found := false
+	for _, f := range result.Findings {
+		if f.Source == model.SourceSyntax && f.Line > 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a syntax finding with a line number, got %+v", result.Findings)
+	}
+}
+
+func TestScanSkipsKubernetesChecksForPlainYAML(t *testing.T) {
+	ctx := context.Background()
+	eng, err := New(Options{SchemaValidation: false, PolicyChecks: true, CompatChecks: true, MinSeverity: "warning"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, err := eng.ScanBytes(ctx, "config.yaml", []byte("name: pipeline\nsteps:\n  - build\n"))
+	if err != nil {
+		t.Fatalf("ScanBytes: %v", err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("plain YAML should produce no findings, got %+v", result.Findings)
+	}
+}
+
 func TestFilterFixable(t *testing.T) {
 	findings := []struct {
 		id   string
@@ -61,7 +102,7 @@ func TestFilterFixable(t *testing.T) {
 	for _, c := range findings {
 		f := model.Finding{RuleID: c.id, SourceFile: "a.yaml", DocIndex: 0}
 		if c.fix {
-			f.Fix = &model.Fix{RuleID: c.id}
+			f.Fix = &model.Fix{RuleID: c.id, Apply: func(u *unstructured.Unstructured) error { return nil }}
 		}
 		input = append(input, f)
 	}

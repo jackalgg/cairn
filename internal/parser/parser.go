@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	yamlv3 "go.yaml.in/yaml/v3"
+
 	"github.com/jackalgg/cairn/internal/model"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -23,6 +25,15 @@ func ParseFile(path string) ([]model.Document, error) {
 	return Parse(path, data)
 }
 
+func ReadPath(path string) (string, []byte, error) {
+	if path == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		return "<stdin>", data, err
+	}
+	data, err := os.ReadFile(path)
+	return path, data, err
+}
+
 func Parse(source string, data []byte) ([]model.Document, error) {
 	chunks := splitDocuments(data)
 	var docs []model.Document
@@ -31,18 +42,29 @@ func Parse(source string, data []byte) ([]model.Document, error) {
 		if len(raw) == 0 {
 			continue
 		}
-		var obj unstructured.Unstructured
-		if err := yaml.Unmarshal(raw, &obj.Object); err != nil {
+		// First validate the chunk as arbitrary YAML so that syntax errors
+		// surface (and can trigger repair) while non-mapping documents
+		// (top-level lists, scalars, plain configs) are still accepted.
+		var generic interface{}
+		if err := yamlv3.Unmarshal(raw, &generic); err != nil {
 			return nil, fmt.Errorf("document %d in %s: %w", i+1, source, err)
 		}
-		gvk := extractGVK(&obj)
-		docs = append(docs, model.Document{
+		doc := model.Document{
 			Index:   len(docs),
-			GVK:     gvk,
-			Object:  obj,
 			RawYAML: append([]byte(nil), raw...),
 			Source:  source,
-		})
+		}
+		// Only mappings can be Kubernetes resources. Use the JSON-based
+		// unmarshal so numbers and nested types match what the schema
+		// validator expects.
+		if _, ok := generic.(map[string]interface{}); ok {
+			var obj unstructured.Unstructured
+			if err := yaml.Unmarshal(raw, &obj.Object); err == nil {
+				doc.Object = obj
+				doc.GVK = extractGVK(&obj)
+			}
+		}
+		docs = append(docs, doc)
 	}
 	return docs, nil
 }
@@ -94,17 +116,26 @@ func isYAMLFile(path string) bool {
 }
 
 func splitDocuments(data []byte) [][]byte {
-	parts := bytes.Split(data, []byte("\n---"))
-	if len(parts) == 1 {
-		parts = bytes.Split(data, []byte("---"))
-	}
+	lines := bytes.Split(data, []byte("\n"))
 	var chunks [][]byte
-	for _, part := range parts {
-		part = bytes.TrimSpace(part)
-		if len(part) == 0 {
+	var current []byte
+	for _, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		if bytes.Equal(trimmed, []byte("---")) && len(current) > 0 {
+			chunks = append(chunks, bytes.TrimSpace(current))
+			current = nil
 			continue
 		}
-		chunks = append(chunks, part)
+		if len(current) > 0 {
+			current = append(current, '\n')
+		}
+		current = append(current, line...)
+	}
+	if len(bytes.TrimSpace(current)) > 0 {
+		chunks = append(chunks, bytes.TrimSpace(current))
+	}
+	if len(chunks) == 0 && len(bytes.TrimSpace(data)) > 0 {
+		return [][]byte{bytes.TrimSpace(data)}
 	}
 	return chunks
 }
