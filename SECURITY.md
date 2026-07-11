@@ -35,29 +35,27 @@ Timelines may vary for pre-release software. We will communicate status even whe
 
 ## Scope
 
+Cairn is a local command-line tool that reads YAML and rewrites its indentation.
+It does not talk to a network, a cluster, or any credentials.
+
 ### In scope
 
-- Local file read/write behavior (`scan`, `fix`, `compat`)
-- Path handling for `--out` and in-place writes
-- YAML parsing limits and denial-of-service vectors
-- Credential handling when using `--cluster`, `--kubeconfig`, or `--context`
-- Incorrect or unsafe auto-fixes that weaken manifest security
+- Local file read/write behavior (`cairn fix`, including `--in-place`)
+- YAML parsing limits and denial-of-service vectors (e.g. very large or deeply nested input)
+- Any case where a repair alters more than leading whitespace (see below)
 
 ### Out of scope
 
 - Vulnerabilities in upstream dependencies (report to the upstream project; we will bump versions)
-- Kubernetes cluster security issues unrelated to Cairn's local operation
-- Issues in manifests Cairn did not generate or modify
+- Correctness of a manifest's *content* — Cairn does not validate, lint, or apply manifests
+- Issues in YAML Cairn did not modify
 
 ## Known architectural risks
 
-Cairn reads and writes local YAML files and optionally reads kubeconfig to probe cluster version. It does **not** apply changes to a live cluster today.
+Cairn reads and writes local YAML files only. Risks tracked in the backlog:
 
-Known risks tracked in the project backlog:
+- **In-place overwrite** happens directly via `os.WriteFile`; a crash mid-write could truncate a file. Atomic write (temp file + rename) is planned. Use `--dry-run` or version control if this matters to you.
+- **Unbounded input size** — no size or nesting-depth limit on YAML input yet.
+- **Content-preservation is not yet enforced as a hard invariant.** By design Cairn only changes leading whitespace, but there is not yet a guard that *refuses to write* if a repair changed anything else. Adding that guard is on the roadmap. Until then, review `--dry-run` output for anything important.
 
-- In-place file overwrite without atomic rename or backup
-- Path traversal potential in `--out` directory writes
-- Unbounded YAML input size
-- YAML round-trip rewrites that alter file content beyond the intended fix
-
-See the [Known limitations](README.md#known-limitations-todos-and-audit-findings) section in README.md for the full list.
+See the [Roadmap](README.md#roadmap) in README.md for planned mitigations.

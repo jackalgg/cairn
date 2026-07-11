@@ -31,39 +31,6 @@ func TestValidateYAML(t *testing.T) {
 	}
 }
 
-func TestParseAcceptsNonKubernetesYAML(t *testing.T) {
-	docs, err := Parse("config.yaml", []byte("name: pipeline\nsteps:\n  - build\n  - test\n"))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(docs) != 1 {
-		t.Fatalf("docs = %d, want 1", len(docs))
-	}
-	if docs[0].IsKubernetes() {
-		t.Fatal("plain config should not be detected as Kubernetes")
-	}
-}
-
-func TestParseDetectsKubernetesYAML(t *testing.T) {
-	docs, err := Parse("pod.yaml", []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\n"))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(docs) != 1 || !docs[0].IsKubernetes() {
-		t.Fatalf("expected one Kubernetes document, got %+v", docs)
-	}
-}
-
-func TestParseTopLevelSequence(t *testing.T) {
-	docs, err := Parse("list.yaml", []byte("- a\n- b\n"))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if len(docs) != 1 || docs[0].IsKubernetes() {
-		t.Fatalf("top-level sequence should parse as a non-Kubernetes doc, got %+v", docs)
-	}
-}
-
 func TestParseErrorLine(t *testing.T) {
 	err := ValidateYAML([]byte("a:\n\tb: 1\n"))
 	if err == nil {

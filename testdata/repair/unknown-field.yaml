@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Pod
-metadata:
-  name: extra-field
-spec:
-  containers:
-  - name: app
-    image: nginx:1.25
-  notARealField: true

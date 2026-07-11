@@ -27,6 +27,9 @@ vendor/
 .vscode/
 .idea/
 
+# Local-only Cursor status rule (kept off GitHub)
+.cursor/rules/cairn-status.mdc
+
 # Terraform (you learned this the hard way)
 .terraform/
 *.tfstate

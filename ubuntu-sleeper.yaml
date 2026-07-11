@@ -1,0 +1,65 @@
+Name:             ubuntu-sleeper
+Namespace:        default
+Priority:         0
+Service Account:  default
+Node:             colima/192.168.5.1
+Start Time:       Sun, 21 Jun 2026 13:08:15 -0400
+Labels:           run=ubuntu-sleeper
+Annotations:      <none>
+Status:           Running
+IP:               10.42.0.28
+IPs:
+  IP:  10.42.0.28
+Containers:
+  ubuntu-sleeper:
+    Container ID:  docker://f6c912fd2d9aaffad36532aa97f4315ae52bbc312b356de7617259df23084ff7
+     Image:         ubuntu
+    Image ID:      docker-pullable://ubuntu@sha256:b7f48194d4d8b763a478a621cdc81c27be222ba2206ca3ca6bc42b49685f3d9e
+    Port:          <none>
+    Host Port:     <none>
+    Args:
+      sh
+      -c
+      sleep 1d
+    State:          Running
+      Started:      Mon, 06 Jul 2026 13:17:54 -0400
+    Last State:     Terminated
+      Reason:       Error
+      Exit Code:    255
+      Started:      Sun, 28 Jun 2026 12:25:40 -0400
+      Finished:     Mon, 06 Jul 2026 13:16:33 -0400
+    Ready:          True
+    Restart Count:  5
+    Environment:    <none>
+     Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-4rlcj (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-4rlcj:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason          Age                  From     Message
+  ----     ------          ----                 ----     -------
+  Normal   SandboxChanged  2m13s                kubelet  Pod sandbox changed, it will be killed and re-created.
+  Warning  Failed          103s                 kubelet  Failed to pull image "ubuntu": Error response from daemon: failed to resolve reference "docker.io/library/ubuntu:latest": failed to do request: Head "https://registry-1.docker.io/v2/library/ubuntu/manifests/latest": dial tcp 52.70.172.251:443: i/o timeout
+  Warning  Failed          103s                 kubelet  Error: ErrImagePull
+  Normal   BackOff         103s                 kubelet  Back-off pulling image "ubuntu"
+  Warning  Failed          103s                 kubelet  Error: ImagePullBackOff
+  Normal   Pulling         91s (x2 over 2m13s)  kubelet  Pulling image "ubuntu"
+  Normal   Pulled          65s                  kubelet  Successfully pulled image "ubuntu" in 25.578s (25.578s including waiting). Image size: 40724716 bytes.
+  Normal   Created         65s                  kubelet  Created container: ubuntu-sleeper
+  Normal   Started         65s                  kubelet  Started container ubuntu-sleeper

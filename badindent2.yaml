@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: bad-indents2
+  name: bad-indents2
+spec:
+   containers:
+  - image: busybox
+    name: bad-indents2
+    resources: {}
+   dnsPolicy: ClusterFirst
+  restartPolicy: Always
+status: {}
