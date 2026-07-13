@@ -1,0 +1,15 @@
+# Colon-spacing is schema-aware: jammed colons in mapping-sequence items
+# (ports) are spaced, but a scalar sequence item like "- kill:9" under command
+# is left as the string "kill:9" — only scope can tell those apart.
+apiVersion: v1
+kind: Pod
+metadata:
+  name:app
+spec:
+  containers:
+  - name:web
+    image:nginx:1.25
+    ports:
+    - containerPort:80
+    command:
+    - kill:9

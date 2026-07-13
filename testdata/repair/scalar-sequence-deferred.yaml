@@ -1,0 +1,16 @@
+# Deferred (sub-case D): scalar sequences whose dashes are missing are NOT
+# repaired. A markerless scalar item can't be distinguished from a mapping key,
+# and `-c` already looks like a marker, so cairn leaves these untouched rather
+# than guess. Documented as a known limit.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+  - name: app
+    image: busybox
+    args:
+    - sh
+    - -c
+    - sleep 1d

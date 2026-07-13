@@ -40,7 +40,15 @@ func runFix(cmd *cobra.Command, args []string) error {
 
 	anyFailed := false
 	for _, src := range sources {
-		fixed, changed := reindent.Reindent(src.data)
+		// Repair pipeline, ordered so each pass can recognize the shapes the
+		// next one relies on. Colon-spacing runs first (so "key:value" becomes a
+		// recognizable key), then list-marker insertion, then reindent (which is
+		// the only whitespace-changing pass). Each pass is a strict no-op when it
+		// finds nothing to fix, keeping the pipeline idempotent.
+		spaced, colonsChanged := reindent.SpaceColons(src.data)
+		withMarkers, markersChanged := reindent.InsertMarkers(spaced)
+		reindented, reindentChanged := reindent.Reindent(withMarkers)
+		fixed, changed := reindented, colonsChanged || markersChanged || reindentChanged
 
 		stillBroken := parser.ValidateYAML(fixed) != nil
 		if stillBroken {

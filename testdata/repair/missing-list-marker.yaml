@@ -4,8 +4,7 @@ metadata:
   name: app
 spec:
   containers:
-  - name: app
+    name: app
     image: nginx:1.25
-    args:
-    - serve
-    --verbose
+    ports:
+      containerPort: 80
