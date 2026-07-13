@@ -81,12 +81,13 @@ func InsertMarkers(data []byte) (out []byte, changed bool) {
 // than reindent's frame — no output columns — because this pass only decides
 // where to insert markers, not where to emit lines.
 type mframe struct {
-	typ        string          // schema type of this scope's children ("" = unknown)
-	isSeq      bool            // children are list items
-	elem       string          // element type for a sequence scope
-	isItem     bool            // opened by a real or inserted marker
-	origIndent int             // original indent where this scope was opened
-	seen       map[string]bool // for item scopes: direct field keys seen so far
+	typ            string          // schema type of this scope's children ("" = unknown)
+	isSeq          bool            // children are list items
+	elem           string          // element type for a sequence scope
+	knownScalarSeq bool            // schema-confirmed sequence of scalars (args/command)
+	isItem         bool            // opened by a real or inserted marker
+	origIndent     int             // original indent where this scope was opened
+	seen           map[string]bool // for item scopes: direct field keys seen so far
 }
 
 func insertMarkersDoc(lines []string) ([]string, int) {
@@ -144,19 +145,37 @@ func insertMarkersDoc(lines []string) ([]string, int) {
 				}
 			} else {
 				stack = append(stack, item)
+				if isBlockScalar(inline) {
+					// A bare block-scalar item ("- |"): skip its body so its
+					// free-text lines are never taken for lost-dash items.
+					skipBlockScalar(lines, &i, orig, &out)
+				}
 			}
 			continue
 		}
 
 		key, value, ok := splitKeyValue(content)
-		if !ok {
-			out = append(out, raw)
-			continue
-		}
 
 		// Structural dedent: leave scopes whose opener is at or below this indent.
+		// Done before the key/non-key split so the enclosing scope is known.
 		for len(stack) > 1 && top().origIndent >= orig {
 			popm()
+		}
+
+		if !ok {
+			// Sub-case D (scalar sequences only): a non-key line inside a
+			// schema-confirmed scalar sequence (args/command) is a scalar item
+			// that lost its dash — e.g. `- -c` followed by a bare `sleep 1d`.
+			// Restricted to known scalar sequences so we never guess a boundary
+			// in an arbitrary or free-form sequence.
+			if seqIndent, in := scalarSeqIndent(&stack); in {
+				out = append(out, insertMarker(raw, seqIndent))
+				insertions++
+				stack = append(stack, mframe{isItem: true, origIndent: seqIndent, seen: map[string]bool{}})
+				continue
+			}
+			out = append(out, raw)
+			continue
 		}
 
 		t := top()
@@ -205,6 +224,25 @@ func openBlock(stack *[]mframe, parentType, key, value string, orig int, lines [
 	}
 }
 
+// scalarSeqIndent reports whether the stack is currently inside a
+// schema-confirmed scalar sequence (args/command). If so it pops any open
+// scalar-item frame so the sequence itself is on top, and returns the indent at
+// which a lost-dash item's marker should be emitted. It handles both the first
+// item (top is the sequence) and a later item (top is a scalar item whose parent
+// is the sequence).
+func scalarSeqIndent(stack *[]mframe) (int, bool) {
+	s := *stack
+	top := &s[len(s)-1]
+	if top.knownScalarSeq {
+		return top.origIndent, true
+	}
+	if top.isItem && len(s) >= 2 && s[len(s)-2].knownScalarSeq {
+		*stack = s[:len(s)-1] // leave the scalar item; the sequence is now on top
+		return s[len(s)-2].origIndent, true
+	}
+	return 0, false
+}
+
 // pushMScope pushes the scope a block-opening key introduces, typed from the
 // schema when the parent type is known.
 func pushMScope(stack *[]mframe, parentType, key string, keyOrig int) {
@@ -213,6 +251,7 @@ func pushMScope(stack *[]mframe, parentType, key string, keyOrig int) {
 		if fd.seq {
 			f.isSeq = true
 			f.elem = fd.elem
+			f.knownScalarSeq = fd.elem == ""
 		} else {
 			f.typ = fd.child
 		}

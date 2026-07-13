@@ -122,6 +122,32 @@ data:
 	}
 }
 
+func TestColonSpacingCollapsesExtraSpace(t *testing.T) {
+	// Over-spaced keys ("name:   app") are normalized to a single space, the same
+	// pass that fixes jammed keys.
+	in := []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name:   app
+spec:
+  containers:
+  - name:   web
+    image: nginx
+`)
+	out, changed := SpaceColons(in)
+	if !changed {
+		t.Fatalf("over-spaced keys were not normalized:\n%s", out)
+	}
+	if bytes.Contains(out, []byte("name:   ")) {
+		t.Errorf("extra space not collapsed:\n%s", out)
+	}
+	valid(t, out)
+	m := asMap(t, repair(in))
+	if m["metadata"].(map[string]interface{})["name"] != "app" {
+		t.Errorf("value changed by space collapse:\n%s", out)
+	}
+}
+
 func TestColonSpacingNoOpOnValidFile(t *testing.T) {
 	in := []byte(`apiVersion: v1
 kind: Pod

@@ -9,9 +9,9 @@ spec:
   - args:
     - sh
     - -c
-    - sleep 1d
+      sleep 1d
     image: ubuntu
-    name: ubuntu-sleeper
+    name:   ubuntu-sleeper
     resources: {}
   dnsPolicy: ClusterFirst
   restartPolicy: Always

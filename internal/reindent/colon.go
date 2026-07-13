@@ -33,9 +33,12 @@ import (
 	"strings"
 )
 
-// colonKeyRe matches a key token whose colon is immediately followed by a value
-// with no separating space. Groups: 1=leading indent, 2=key, 3=value.
-var colonKeyRe = regexp.MustCompile(`^(\s*)([A-Za-z0-9_.-]+):([^\s].*)$`)
+// colonKeyRe matches a key token followed by a colon and a wrongly-spaced value.
+// Group 3 is the gap after the colon (empty for a jammed "key:value", two-plus
+// spaces for an over-spaced "key:   value"); group 4 is the value. A single
+// space is already canonical and is left unchanged by fixColon. Groups:
+// 1=leading indent, 2=key, 3=gap, 4=value.
+var colonKeyRe = regexp.MustCompile(`^(\s*)([A-Za-z0-9_.-]+):(\s*)(\S.*)$`)
 
 // SpaceColons rewrites "key:value" mapping keys to "key: value". It reports
 // whether anything changed and returns data untouched when nothing did, so the
@@ -140,6 +143,11 @@ func spaceColonsDoc(lines []string) ([]string, int) {
 				}
 			} else {
 				stack = append(stack, item)
+				if isBlockScalar(inline) {
+					// A bare block-scalar item ("- |"): skip its body so its
+					// free-text lines are never rewritten.
+					skipBlockScalar(lines, &i, orig, &out)
+				}
 			}
 			continue
 		}
@@ -167,14 +175,19 @@ func spaceColonsDoc(lines []string) ([]string, int) {
 	return out, fixes
 }
 
-// fixColon returns content with a space inserted after a jammed key colon, and
-// whether it applied. content must have no leading whitespace.
+// fixColon normalizes the spacing after a key colon to exactly one space,
+// repairing both jammed ("key:value") and over-spaced ("key:   value") keys. It
+// returns the fixed content and whether it changed. content must have no leading
+// whitespace.
 func fixColon(content string) (string, bool) {
 	m := colonKeyRe.FindStringSubmatch(content)
 	if m == nil {
 		return content, false
 	}
-	key, value := m[2], m[3]
+	key, gap, value := m[2], m[3], m[4]
+	if gap == " " { // already canonical
+		return content, false
+	}
 	if strings.HasPrefix(value, "//") || looksLikeTime(key, value) {
 		return content, false
 	}

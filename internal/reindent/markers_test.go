@@ -81,9 +81,7 @@ spec:
 }
 
 func TestScalarSequenceUntouched(t *testing.T) {
-	// Sub-case D (deferred): args/command are scalar sequences. A markerless
-	// scalar can't be told from a mapping key, and `-c` already looks like a
-	// marker, so InsertMarkers must leave these completely alone.
+	// A correctly-dashed scalar sequence must be left exactly as-is.
 	in := []byte(`apiVersion: v1
 kind: Pod
 metadata:
@@ -103,6 +101,80 @@ spec:
 	}
 	if !bytes.Equal(out, in) {
 		t.Errorf("scalar-sequence input was modified:\n%s", out)
+	}
+}
+
+func TestScalarSequenceLostDash(t *testing.T) {
+	// Sub-case D (schema-confirmed scalar seqs only): a bare `sleep 1d` under
+	// args — indented as if it were a continuation of `-c` — is a scalar item
+	// that lost its dash and must be restored to a separate element.
+	in := []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+  - args:
+    - sh
+    - -c
+      sleep 1d
+    image: ubuntu
+    name: app
+`)
+	out := repair(in)
+	valid(t, out)
+	m := asMap(t, out)
+	c := m["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})
+	args := c["args"].([]interface{})
+	if len(args) != 3 || args[0] != "sh" || args[1] != "-c" || args[2] != "sleep 1d" {
+		t.Errorf("args not split into 3 items: %v\n%s", args, out)
+	}
+	if c["image"] != "ubuntu" || c["name"] != "app" {
+		t.Errorf("container fields lost after args repair: %v\n%s", c, out)
+	}
+}
+
+func TestBlockScalarItemUnderScalarSeq(t *testing.T) {
+	// A bare block-scalar item (`- |`) under args must keep its body as one
+	// element; its lines must NOT become separate lost-dash items.
+	in := []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+  - name: c
+    image: busybox
+    args:
+    - sh
+    - -c
+    - |
+      echo hi
+      sleep 1d
+`)
+	out := repair(in)
+	valid(t, out)
+	m := asMap(t, out)
+	args := m["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["args"].([]interface{})
+	if len(args) != 3 {
+		t.Fatalf("block scalar item was split: %v\n%s", args, out)
+	}
+	if args[2] != "echo hi\nsleep 1d\n" {
+		t.Errorf("block scalar body corrupted: %q\n%s", args[2], out)
+	}
+}
+
+func TestUnknownSequenceNotSplit(t *testing.T) {
+	// `steps` is not a schema-known scalar sequence, so a dashless `deploy`
+	// under it must be left alone rather than guessed into an item.
+	in := []byte(`steps:
+- build
+- test
+  deploy
+`)
+	_, changed := InsertMarkers(in)
+	if changed {
+		t.Errorf("InsertMarkers split an unknown (non-schema) sequence")
 	}
 }
 

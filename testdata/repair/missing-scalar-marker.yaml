@@ -1,0 +1,16 @@
+# Sub-case D, safe subset: `args` is a schema-confirmed scalar sequence, so a
+# bare `sleep 1d` that lost its dash (and drifted to a continuation indent) is
+# restored to its own element. The over-spaced `name:` is normalized too.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ubuntu-sleeper
+spec:
+  containers:
+  - args:
+    - sh
+    - -c
+      sleep 1d
+    image: ubuntu
+    name:   ubuntu-sleeper
+    resources: {}
