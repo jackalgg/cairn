@@ -254,6 +254,38 @@ func TestIdempotent(t *testing.T) {
 	}
 }
 
+func TestSecondItemAfterNestedSequence(t *testing.T) {
+	// Regression: a container that ends with a nested sequence (ports) must not
+	// swallow the NEXT container's marker into that nested sequence. The pop
+	// loop has to leave `ports` (whose items sat deeper) before adopting.
+	in := []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+  - name: a
+    image: nginx
+    ports:
+    - containerPort: 80
+  - name: b
+    image: redis
+`)
+	out, changed := Reindent(in)
+	if changed || !bytes.Equal(out, in) {
+		t.Errorf("valid two-container file was modified:\n%s", out)
+	}
+	m := asMap(t, out)
+	containers := m["spec"].(map[string]interface{})["containers"].([]interface{})
+	if len(containers) != 2 {
+		t.Fatalf("containers = %d, want 2:\n%s", len(containers), out)
+	}
+	b := containers[1].(map[string]interface{})
+	if b["name"] != "b" || b["image"] != "redis" {
+		t.Errorf("second container wrong: %v\n%s", b, out)
+	}
+}
+
 func TestMultiDocument(t *testing.T) {
 	in := []byte(`apiVersion: v1
 kind: Pod

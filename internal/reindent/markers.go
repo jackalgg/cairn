@@ -114,12 +114,22 @@ func insertMarkersDoc(lines []string) ([]string, int) {
 		// A list marker: dedent to the holding sequence, then open an item scope
 		// so a later item that lost *its* dash (sub-case C) can be detected.
 		if content == "-" || strings.HasPrefix(content, "- ") {
+			// poppedItem: see reindent.go emitListItem — a sequence whose own
+			// items sat deeper than this marker does not own it.
+			poppedItem := -1
 			for len(stack) > 1 {
 				t := top()
 				if t.isSeq {
+					if poppedItem >= 0 && orig < poppedItem {
+						popm()
+						continue
+					}
 					break
 				}
 				if orig < t.origIndent || (orig == t.origIndent && t.isItem) {
+					if t.isItem {
+						poppedItem = t.origIndent
+					}
 					popm()
 					continue
 				}
@@ -156,10 +166,16 @@ func insertMarkersDoc(lines []string) ([]string, int) {
 
 		key, value, ok := splitKeyValue(content)
 
-		// Structural dedent: leave scopes whose opener is at or below this indent.
-		// Done before the key/non-key split so the enclosing scope is known.
-		for len(stack) > 1 && top().origIndent >= orig {
-			popm()
+		if ok {
+			// Schema-aware placement mirroring reindent's placeKey, so this
+			// pass resolves a key's scope the same way the reindenter will —
+			// including a sequence key that is itself mis-indented.
+			placeMKey(&stack, key, orig)
+		} else {
+			// Non-key line: structural dedent only (no key to consult).
+			for len(stack) > 1 && top().origIndent >= orig {
+				popm()
+			}
 		}
 
 		if !ok {
@@ -222,6 +238,43 @@ func openBlock(stack *[]mframe, parentType, key, value string, orig int, lines [
 	if isBlockScalar(value) {
 		skipBlockScalar(lines, i, orig, out)
 	}
+}
+
+// placeMKey pops the stack until the frame that should parent key is on top,
+// mirroring reindent's placeKey priority order so the pre-passes and the
+// reindenter resolve scope identically. One extra rule ahead of the ancestor
+// check: a key indented under an open sequence whose element type declares it
+// stays with that sequence — that is exactly the lost-marker shape sub-case B
+// repairs, and it must win over dedenting toward an ancestor.
+func placeMKey(stack *[]mframe, key string, orig int) {
+	for len(*stack) > 1 {
+		t := (*stack)[len(*stack)-1]
+		switch {
+		case t.isSeq && orig > t.origIndent && declares(t.elem, key):
+			return // a lost-marker item field: stay for the B sub-case
+		case declares(t.typ, key):
+			return // this scope specifically owns the key
+		case ancestorDeclaresM(*stack, key):
+			*stack = (*stack)[:len(*stack)-1] // dedent toward the real owner
+		case (t.typ == "" || t.typ == stringMap) && !t.isSeq && orig > t.origIndent:
+			return // free-form scope; indentation is the only signal
+		case orig <= t.origIndent:
+			*stack = (*stack)[:len(*stack)-1] // structural dedent
+		default:
+			return
+		}
+	}
+}
+
+// ancestorDeclaresM reports whether any frame below the top specifically
+// declares key.
+func ancestorDeclaresM(stack []mframe, key string) bool {
+	for i := len(stack) - 2; i >= 0; i-- {
+		if declares(stack[i].typ, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // scalarSeqIndent reports whether the stack is currently inside a

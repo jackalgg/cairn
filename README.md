@@ -1,12 +1,16 @@
 # Cairn
 
-**Cairn fixes broken indentation in YAML** — the kind that makes a Kubernetes or
-Docker manifest die in the terminal with `mapping values are not allowed here` or
-`did not find expected key`. It reconstructs the document's real structure and
-rewrites every line at the correct depth, so the file parses again.
+**Cairn repairs mechanically broken YAML manifests** — the kind that makes a
+Kubernetes or Docker manifest die in the terminal with `mapping values are not
+allowed here` or `error validating data`. It reconstructs the document's real
+structure and repairs indentation, missing list markers, jammed `key:value`
+colons, and wrong or missing `apiVersion`/`kind`, so the file parses and applies
+again.
 
-It does one thing and does it well. Cairn only touches leading whitespace —
-your values, quoting, comments, and block scalars are left exactly as they were.
+Every repair runs as a small, isolated pass with a declared *edit budget* —
+the only kind of change it is allowed to make — and each pass's output is
+verified against that budget before it is accepted. Your values, quoting,
+comments, and block scalars are left exactly as they were.
 
 ```console
 $ cairn fix --dry-run deploy.yaml
@@ -89,7 +93,7 @@ it's broken in a way Cairn doesn't fix (see [Scope](#scope)).
 
 ## What it fixes
 
-Any number of these, simultaneously, in one pass:
+Any number of these, simultaneously:
 
 - **Tabs** used for indentation (converted to spaces).
 - **Wrong depth** — lines indented too far or not far enough.
@@ -97,6 +101,17 @@ Any number of these, simultaneously, in one pass:
 - **Odd offsets** — the classic "one extra space" that breaks sibling alignment.
 - **Fields in the wrong block** — for known Kubernetes kinds, a field indented
   into the wrong parent is moved back where the schema says it belongs.
+- **Colon spacing** — `image:nginx` → `image: nginx`, and `name:   app` →
+  `name: app`. Schema-aware, so a scalar list item like `- kill:9` under
+  `command:` is *not* mistaken for a mapping.
+- **Missing list markers** — a `containers:` item that lost its `- ` (detected
+  by schema), a second item merged into the first (detected by a repeated key),
+  or a scalar `args:`/`command:` entry that lost its dash.
+- **Wrong or missing identity** — `apiVersion: extensions/v1beta1` on a
+  Deployment becomes `apps/v1`; a missing `apiVersion` is inserted (it is
+  derivable from the kind); `kind: deployment` becomes `Deployment`, which also
+  unlocks the schema-aware repairs above. Every such repair is reported on
+  stderr as `file:line: apiVersion "extensions/v1beta1" → "apps/v1"`.
 
 Kubernetes kinds understood today: Pod, Deployment (and ReplicaSet / DaemonSet /
 StatefulSet), Job, CronJob, Service, ConfigMap / Secret, and their nested types
@@ -109,20 +124,25 @@ blocks, and odd offsets.
 
 ## Scope
 
-Cairn is an **indentation** tool, on purpose. It will not:
+Cairn repairs what is **mechanically derivable** — where the file itself (plus
+the Kubernetes object model) proves what the author meant. It will not:
 
-- add missing colons or fix `key:value` spacing *(planned — see roadmap)*,
-- insert missing list markers *(planned)*,
-- correct misspelled keys or wrong values,
-- validate your manifest against a schema, lint for security, or talk to a cluster.
+- correct misspelled field names *(planned next — high-confidence only)*,
+- guess at values, delete unknown fields, or reorder anything,
+- validate your manifest against a full schema, lint for security, or talk to a
+  cluster.
 
-If a file is broken in one of those ways, Cairn fixes the indentation it can and
-tells you the file still doesn't parse, rather than silently guessing. There are
-excellent dedicated tools for validation and policy (kubeconform, kube-score,
-checkov) — Cairn deliberately stays out of their lane.
+If a file is broken in a way Cairn can't prove a fix for, it repairs what it
+can and tells you the file still doesn't parse, rather than silently guessing.
+There are excellent dedicated tools for validation and policy (kubeconform,
+kube-score, checkov) — Cairn deliberately stays out of their lane.
 
-**Safety:** Cairn only ever rewrites leading whitespace. It never edits the
-content of a line, so it cannot change a value, drop a comment, or reorder keys.
+**Safety:** every pass has a declared edit budget — reindent may only change
+leading whitespace, the marker pass may only insert `- `, colon repair may only
+adjust spacing, identity repair may only rewrite/insert `apiVersion`/`kind`
+lines. After each pass an independent verifier re-checks the output against
+that budget; an out-of-contract edit is discarded and reported instead of
+written. A bug in any single pass cannot corrupt your file.
 
 ---
 
@@ -130,9 +150,13 @@ content of a line, so it cannot change a value, drop a comment, or reorder keys.
 
 ```
 internal/reindent/
+  pipeline.go   the verified repair chain: identity → colons → markers → reindent
+  identity.go   apiVersion/kind repair (table-driven, per document)
+  colon.go      colon-spacing repair (schema-aware, skips scalar seq items)
+  markers.go    missing list-marker insertion (schema-confirmed sequences only)
   reindent.go   Reindent([]byte) → rebuild the scope tree, re-emit at canonical depth
-  schema.go     compact Kubernetes type table (field → parent) used to place fields
-cmd/            thin CLI: read → reindent → validate → print / diff / write
+  schema.go     compact Kubernetes type table (field → parent) shared by every pass
+cmd/            thin CLI: read → Fix pipeline → validate → print / diff / write
 internal/parser generic YAML validation (ValidateYAML, ParseErrorLine)
 ```
 
@@ -150,25 +174,21 @@ go test ./...
 
 ## Roadmap
 
-Cairn is focused on **core user utility**: making broken manifests parse, without
-turning into a linter or policy engine. Planned work, all in the same lane:
+Cairn is focused on **core user utility**: making broken manifests parse and
+apply, without turning into a linter or policy engine. Planned work:
 
-- **List-marker repair** — schema-aware insertion / re-alignment of `- ` (a value
-  that should be a sequence item but lost its dash).
-- **Colon-spacing repair** — `key:value` → `key: value`.
-- **Content-preservation guarantee** — hard invariant + refuse-to-write guard that
-  proves a fix only changed whitespace.
+- **Field-typo repair** — a unique, unambiguous match against the schema fields
+  of the current scope (`contaieners:` → `containers:`) is fixed and reported;
+  anything fuzzier becomes a suggestion, never an edit.
 - **Clearer "can't fix" messages** — name the line and error class instead of the
   raw parser error.
 - **Wider schema coverage** — more kinds (Ingress, NetworkPolicy, PVC, HPA, RBAC)
-  and Docker Compose, so smart dedent applies to more manifests.
-- **Key-typo suggestions** — fuzzy-match unknown keys against the known field set
-  for the current type, high-confidence only.
+  and Docker Compose, so every schema-aware pass applies to more manifests.
 - **Adoption** — pre-commit hook and GitHub Action (using `--check`).
 
 Explicitly **out of scope** (use a dedicated tool): security/policy hardening,
-schema *validation* reporting, live-cluster interaction, AI repair, any change to
-line content.
+full schema validation, live-cluster interaction, AI repair, deleting or
+reordering anything you wrote.
 
 ---
 

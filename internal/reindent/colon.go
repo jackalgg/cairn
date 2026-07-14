@@ -108,12 +108,22 @@ func spaceColonsDoc(lines []string) ([]string, int) {
 		// type declares that key (a mapping sequence). Scalar sequences leave
 		// "- kill:9" untouched because declares("", ...) is false.
 		if content == "-" || strings.HasPrefix(content, "- ") {
+			// poppedItem: see reindent.go emitListItem — a sequence whose own
+			// items sat deeper than this marker does not own it.
+			poppedItem := -1
 			for len(stack) > 1 {
 				t := top()
 				if t.isSeq {
+					if poppedItem >= 0 && orig < poppedItem {
+						popm()
+						continue
+					}
 					break
 				}
 				if orig < t.origIndent || (orig == t.origIndent && t.isItem) {
+					if t.isItem {
+						poppedItem = t.origIndent
+					}
 					popm()
 					continue
 				}
@@ -153,9 +163,16 @@ func spaceColonsDoc(lines []string) ([]string, int) {
 		}
 
 		// A plain line under any mapping/sequence scope is a mapping key, so a
-		// jammed colon is always safe to space here.
-		for len(stack) > 1 && top().origIndent >= orig {
-			popm()
+		// jammed colon is always safe to space here. Placement uses the shared
+		// schema-aware walk so the scope stays typed for later list items.
+		if key, _, ok := splitKeyValue(content); ok {
+			placeMKey(&stack, key, orig)
+		} else if k := colonKey(content); k != "" {
+			placeMKey(&stack, k, orig)
+		} else {
+			for len(stack) > 1 && top().origIndent >= orig {
+				popm()
+			}
 		}
 		if fixed, ok := fixColon(content); ok {
 			content = fixed

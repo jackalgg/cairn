@@ -5,12 +5,10 @@ import (
 	"testing"
 )
 
-// repair runs the full fix pipeline (colon spacing, marker insertion, reindent)
-// the way cmd/fix does, so these tests exercise the passes in composition.
+// repair runs the full verified fix pipeline the way cmd/fix does, so these
+// tests exercise the passes in composition.
 func repair(data []byte) []byte {
-	spaced, _ := SpaceColons(data)
-	withMarkers, _ := InsertMarkers(spaced)
-	out, _ := Reindent(withMarkers)
+	out, _, _ := Fix(data)
 	return out
 }
 

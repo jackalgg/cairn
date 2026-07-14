@@ -53,7 +53,11 @@ func Reindent(data []byte) (out []byte, changed bool) {
 	if trailingNewline {
 		rebuilt += "\n"
 	}
-	return []byte(rebuilt), rebuilt != text
+	// changed must be measured against the ORIGINAL bytes, not the
+	// tab-normalized text: a tabs-only difference is still a change, and a
+	// caller that trusts changed==false to mean "output equals input" (the
+	// pipeline does) would otherwise discard the repair.
+	return []byte(rebuilt), rebuilt != string(data)
 }
 
 // frame is one open scope on the stack.
@@ -177,12 +181,23 @@ func emitListItem(stack *[]frame, orig int, content string) string {
 	// deeper — both are valid YAML — so a map-key scope at equal-or-deeper
 	// indent *holds* this sequence rather than being a sibling of it. Only a
 	// prior list item's own scope at equal indent is a sibling to pop.
+	// poppedItem remembers the indent of the most recently popped item frame:
+	// if a sequence's own items sat deeper than this marker, the marker is not
+	// one of them (a nested seq like `ports:` when the next container begins).
+	poppedItem := -1
 	for len(*stack) > 1 {
 		t := top(*stack)
 		if t.isSeq {
+			if poppedItem >= 0 && orig < poppedItem {
+				pop(stack)
+				continue
+			}
 			break
 		}
 		if orig < t.origIndent || (orig == t.origIndent && t.isItem) {
+			if t.isItem {
+				poppedItem = t.origIndent
+			}
 			pop(stack)
 			continue
 		}

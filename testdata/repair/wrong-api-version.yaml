@@ -1,0 +1,27 @@
+# Identity repair: deprecated apiVersion + lowercase kind/key casing in doc 1
+# (which also unlocks the schema for the indentation fix), and a missing
+# apiVersion inserted in doc 2.
+apiversion: extensions/v1beta1
+kind: deployment
+metadata:
+  name: legacy
+spec:
+  selector:
+    matchLabels:
+      app: legacy
+  template:
+    metadata:
+      labels:
+        app: legacy
+    spec:
+containers:
+      - name: app
+        image: nginx
+---
+kind: Pod
+metadata:
+  name: sidecar-test
+spec:
+  containers:
+  - name: app
+    image: nginx
