@@ -1,0 +1,22 @@
+# Two missing markers interacting (the broken.yaml case): the container item
+# lost its dash (sub-case B) AND a scalar arg lost its dash (sub-case D), with
+# `args:` itself mis-indented. The inserted `- sleep 1d` must align with its
+# `- sh` / `- -c` siblings, not with the mis-indented `args:` key.
+apiVersion: v2
+kind: Pod
+metadata:
+  labels:
+    run: ubuntu-sleeper
+  name: ubuntu-sleeper
+spec:
+  containers:
+   args:
+    - sh
+    - -c
+      sleep 1d
+    image: ubuntu
+    name:   ubuntu-sleeper
+    resources: {}
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+status: {}

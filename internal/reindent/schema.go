@@ -92,9 +92,20 @@ var schemaTable = map[string]map[string]field{
 		"immutable":  leaf,
 	},
 
+	// ObjectMeta is COMPLETE (every real metadata field is listed) — that is
+	// what lets the typo pass warn on unknown fields there (completeTypes in
+	// typos.go). If upstream Kubernetes ever adds a field, add it here too.
 	"ObjectMeta": {
 		"name": leaf, "namespace": leaf, "generateName": leaf,
-		"labels": mapping(stringMap), "annotations": mapping(stringMap),
+		"uid": leaf, "resourceVersion": leaf, "generation": leaf, "selfLink": leaf,
+		"creationTimestamp": leaf, "deletionTimestamp": leaf,
+		"deletionGracePeriodSeconds": leaf,
+		"clusterName":                leaf, // removed in k8s 1.25, but old manifests carry it
+		"labels":                     mapping(stringMap),
+		"annotations":                mapping(stringMap),
+		"ownerReferences":            seqOf(stringMap),
+		"managedFields":              seqOf(stringMap),
+		"finalizers":                 seqOf(""),
 	},
 
 	"DeploymentSpec": {
@@ -205,7 +216,9 @@ var schemaTable = map[string]map[string]field{
 		"downwardAPI":           mapping(stringMap),
 	},
 	"ServiceSpec": {
-		"type": leaf, "clusterIP": leaf, "externalName": leaf,
+		// clusterIPs must be listed: it is a real field one edit from
+		// clusterIP, and the typo pass would otherwise "fix" it.
+		"type": leaf, "clusterIP": leaf, "clusterIPs": seqOf(""), "externalName": leaf,
 		"sessionAffinity": leaf, "externalTrafficPolicy": leaf, "loadBalancerIP": leaf,
 		"selector": mapping(stringMap),
 		"ports":    seqOf("ServicePort"),

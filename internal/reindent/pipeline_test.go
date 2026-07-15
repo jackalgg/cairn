@@ -131,6 +131,38 @@ func TestVerifyMarkers(t *testing.T) {
 	}
 }
 
+func TestVerifyTypos(t *testing.T) {
+	before := []byte("kind: Pod\nspec:\n  contaieners:\n    name: app\n")
+	// Legit: one key renamed by one edit.
+	if err := verifyTypos(before, []byte("kind: Pod\nspec:\n  containers:\n    name: app\n")); err != nil {
+		t.Errorf("legit key rename rejected: %v", err)
+	}
+	// Legit: kind value renamed by one edit.
+	if err := verifyTypos(
+		[]byte("kind: Deploymet\nmetadata:\n  name: x\n"),
+		[]byte("kind: Deployment\nmetadata:\n  name: x\n")); err != nil {
+		t.Errorf("legit kind rename rejected: %v", err)
+	}
+	// Out of contract: the value changed alongside the key.
+	if err := verifyTypos(before, []byte("kind: Pod\nspec:\n  containers:\n    name: bad\n")); err == nil {
+		t.Errorf("value change not caught")
+	}
+	// Out of contract: a rename of more than one edit.
+	if err := verifyTypos(before, []byte("kind: Pod\nspec:\n  volumes:\n    name: app\n")); err == nil {
+		t.Errorf("multi-edit rename not caught")
+	}
+	// Out of contract: indentation moved.
+	if err := verifyTypos(before, []byte("kind: Pod\nspec:\n    containers:\n    name: app\n")); err == nil {
+		t.Errorf("indent change not caught")
+	}
+	// Out of contract: a non-kind VALUE changed.
+	if err := verifyTypos(
+		[]byte("kind: Pod\nmetadata:\n  name: app\n"),
+		[]byte("kind: Pod\nmetadata:\n  name: apps\n")); err == nil {
+		t.Errorf("non-kind value rename not caught")
+	}
+}
+
 func TestVerifyIdentity(t *testing.T) {
 	before := []byte("apiversion: extensions/v1beta1\nkind: deployment\nmetadata:\n  name: x\n")
 	// Legit: rewrite both identity lines.

@@ -132,6 +132,48 @@ spec:
 	}
 }
 
+func TestScalarSeqLostDashInsideMarkerlessItem(t *testing.T) {
+	// broken.yaml regression: the container item lost its dash (sub-case B) AND
+	// a scalar arg lost its dash (sub-case D), with `args:` itself mis-indented.
+	// The inserted `- sleep 1d` must align with its `- sh` / `- -c` siblings —
+	// aligning it with the mis-indented `args:` key made reindent pop it out of
+	// the sequence and dedent the following container fields to spec level.
+	in := []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: ubuntu-sleeper
+spec:
+  containers:
+   args:
+    - sh
+    - -c
+      sleep 1d
+    image: ubuntu
+    name: ubuntu-sleeper
+    resources: {}
+  dnsPolicy: ClusterFirst
+`)
+	out := repair(in)
+	valid(t, out)
+	m := asMap(t, out)
+	spec := m["spec"].(map[string]interface{})
+	if spec["dnsPolicy"] != "ClusterFirst" {
+		t.Errorf("dnsPolicy lost from spec: %v\n%s", spec, out)
+	}
+	containers, ok := spec["containers"].([]interface{})
+	if !ok || len(containers) != 1 {
+		t.Fatalf("containers not a 1-element list: %v\n%s", spec["containers"], out)
+	}
+	c := containers[0].(map[string]interface{})
+	args, ok := c["args"].([]interface{})
+	if !ok || len(args) != 3 || args[0] != "sh" || args[1] != "-c" || args[2] != "sleep 1d" {
+		t.Errorf("args not split into 3 items: %v\n%s", c["args"], out)
+	}
+	if c["image"] != "ubuntu" || c["name"] != "ubuntu-sleeper" {
+		t.Errorf("container fields escaped the item: %v\n%s", c, out)
+	}
+}
+
 func TestBlockScalarItemUnderScalarSeq(t *testing.T) {
 	// A bare block-scalar item (`- |`) under args must keep its body as one
 	// element; its lines must NOT become separate lost-dash items.

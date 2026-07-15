@@ -44,43 +44,9 @@ var colonKeyRe = regexp.MustCompile(`^(\s*)([A-Za-z0-9_.-]+):(\s*)(\S.*)$`)
 // whether anything changed and returns data untouched when nothing did, so the
 // pass is a strict no-op on files that don't need it.
 func SpaceColons(data []byte) (out []byte, changed bool) {
-	text := strings.ReplaceAll(string(data), "\t", "  ")
-	trailingNewline := strings.HasSuffix(text, "\n")
-	body := text
-	if trailingNewline {
-		body = strings.TrimSuffix(body, "\n")
-	}
-	lines := strings.Split(body, "\n")
-
-	var result []string
-	fixes := 0
-	doc := []string{}
-	flush := func() {
-		if len(doc) > 0 {
-			d, n := spaceColonsDoc(doc)
-			result = append(result, d...)
-			fixes += n
-			doc = nil
-		}
-	}
-	for _, ln := range lines {
-		if strings.TrimSpace(ln) == "---" {
-			flush()
-			result = append(result, "---")
-			continue
-		}
-		doc = append(doc, ln)
-	}
-	flush()
-
-	if fixes == 0 {
-		return data, false
-	}
-	rebuilt := strings.Join(result, "\n")
-	if trailingNewline {
-		rebuilt += "\n"
-	}
-	return []byte(rebuilt), true
+	return mapDocs(data, func(lines []string, _ int) ([]string, int) {
+		return spaceColonsDoc(lines)
+	})
 }
 
 func spaceColonsDoc(lines []string) ([]string, int) {
@@ -108,28 +74,7 @@ func spaceColonsDoc(lines []string) ([]string, int) {
 		// type declares that key (a mapping sequence). Scalar sequences leave
 		// "- kill:9" untouched because declares("", ...) is false.
 		if content == "-" || strings.HasPrefix(content, "- ") {
-			// poppedItem: see reindent.go emitListItem — a sequence whose own
-			// items sat deeper than this marker does not own it.
-			poppedItem := -1
-			for len(stack) > 1 {
-				t := top()
-				if t.isSeq {
-					if poppedItem >= 0 && orig < poppedItem {
-						popm()
-						continue
-					}
-					break
-				}
-				if orig < t.origIndent || (orig == t.origIndent && t.isItem) {
-					if t.isItem {
-						poppedItem = t.origIndent
-					}
-					popm()
-					continue
-				}
-				t.isSeq = true
-				break
-			}
+			resolveMarkerScope(&stack, orig)
 			elem := top().elem
 			inline := ""
 			if content != "-" {

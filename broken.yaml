@@ -6,7 +6,7 @@ metadata:
   name: ubuntu-sleeper
 spec:
   containers:
-  - args:
+   args:
     - sh
     - -c
       sleep 1d

@@ -38,43 +38,9 @@ import "strings"
 // returns data unchanged so the pass is a strict no-op on files that don't need
 // it (which keeps the fix pipeline idempotent).
 func InsertMarkers(data []byte) (out []byte, changed bool) {
-	text := strings.ReplaceAll(string(data), "\t", "  ")
-	trailingNewline := strings.HasSuffix(text, "\n")
-	body := text
-	if trailingNewline {
-		body = strings.TrimSuffix(body, "\n")
-	}
-	lines := strings.Split(body, "\n")
-
-	var result []string
-	inserted := 0
-	doc := []string{}
-	flush := func() {
-		if len(doc) > 0 {
-			d, n := insertMarkersDoc(doc)
-			result = append(result, d...)
-			inserted += n
-			doc = nil
-		}
-	}
-	for _, ln := range lines {
-		if strings.TrimSpace(ln) == "---" {
-			flush()
-			result = append(result, "---")
-			continue
-		}
-		doc = append(doc, ln)
-	}
-	flush()
-
-	if inserted == 0 {
-		return data, false
-	}
-	rebuilt := strings.Join(result, "\n")
-	if trailingNewline {
-		rebuilt += "\n"
-	}
-	return []byte(rebuilt), true
+	return mapDocs(data, func(lines []string, _ int) ([]string, int) {
+		return insertMarkersDoc(lines)
+	})
 }
 
 // mframe is one open scope while scanning for missing markers. It tracks less
@@ -114,29 +80,7 @@ func insertMarkersDoc(lines []string) ([]string, int) {
 		// A list marker: dedent to the holding sequence, then open an item scope
 		// so a later item that lost *its* dash (sub-case C) can be detected.
 		if content == "-" || strings.HasPrefix(content, "- ") {
-			// poppedItem: see reindent.go emitListItem — a sequence whose own
-			// items sat deeper than this marker does not own it.
-			poppedItem := -1
-			for len(stack) > 1 {
-				t := top()
-				if t.isSeq {
-					if poppedItem >= 0 && orig < poppedItem {
-						popm()
-						continue
-					}
-					break
-				}
-				if orig < t.origIndent || (orig == t.origIndent && t.isItem) {
-					if t.isItem {
-						poppedItem = t.origIndent
-					}
-					popm()
-					continue
-				}
-				// A map-key scope at equal-or-deeper indent holds this sequence.
-				t.isSeq = true
-				break
-			}
+			resolveMarkerScope(&stack, orig)
 			elem := top().elem
 			item := mframe{typ: elem, isItem: true, origIndent: orig, seen: map[string]bool{}}
 			inline := ""
@@ -282,7 +226,10 @@ func ancestorDeclaresM(stack []mframe, key string) bool {
 // scalar-item frame so the sequence itself is on top, and returns the indent at
 // which a lost-dash item's marker should be emitted. It handles both the first
 // item (top is the sequence) and a later item (top is a scalar item whose parent
-// is the sequence).
+// is the sequence). A later item aligns with its SIBLING's marker, not the
+// sequence key: when the key is itself mis-indented (e.g. `args:` under a
+// container that also lost its dash), a key-aligned marker would sit shallower
+// than the existing items and reindent would pop it out of the sequence.
 func scalarSeqIndent(stack *[]mframe) (int, bool) {
 	s := *stack
 	top := &s[len(s)-1]
@@ -290,8 +237,9 @@ func scalarSeqIndent(stack *[]mframe) (int, bool) {
 		return top.origIndent, true
 	}
 	if top.isItem && len(s) >= 2 && s[len(s)-2].knownScalarSeq {
+		itemIndent := top.origIndent
 		*stack = s[:len(s)-1] // leave the scalar item; the sequence is now on top
-		return s[len(s)-2].origIndent, true
+		return itemIndent, true
 	}
 	return 0, false
 }

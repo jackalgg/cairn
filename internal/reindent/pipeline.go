@@ -40,11 +40,14 @@ type pass struct {
 
 // pipeline is the ordered repair chain. Identity runs first (it needs no other
 // pass and later passes want the corrected kind for schema lookups), then
-// colon-spacing (so "key:value" lines become recognizable keys), then marker
-// insertion, then reindent — the only pass that touches leading whitespace.
+// colon-spacing (so "key:value" lines become recognizable keys), then
+// field-typos (a corrected key unlocks the schema-gated marker repairs), then
+// marker insertion, then reindent — the only pass that touches leading
+// whitespace.
 var pipeline = []pass{
 	{"identity", FixIdentity, verifyIdentity},
 	{"colon-spacing", wrap(SpaceColons), verifyColons},
+	{"field-typos", FixTypos, verifyTypos},
 	{"list-markers", wrap(InsertMarkers), verifyMarkers},
 	{"reindent", wrap(Reindent), verifyReindent},
 }
@@ -152,6 +155,45 @@ func verifyMarkers(before, after []byte) error {
 			continue
 		}
 		return fmt.Errorf("line %d changed beyond a '- ' insertion", i+1)
+	}
+	return nil
+}
+
+// verifyTypos: budget is renaming one token per line by at most one edit —
+// either the key (everything from the colon on must be untouched) or, on a
+// `kind:` line only, the value (everything through the colon must be
+// untouched). Indentation may not move and no line may appear or vanish.
+func verifyTypos(before, after []byte) error {
+	b, a := normLines(before), normLines(after)
+	if len(b) != len(a) {
+		return fmt.Errorf("line count changed %d -> %d", len(b), len(a))
+	}
+	for i := range b {
+		if b[i] == a[i] {
+			continue
+		}
+		if leadingSpaces(b[i]) != leadingSpaces(a[i]) {
+			return fmt.Errorf("line %d indentation changed", i+1)
+		}
+		bc, ac := strings.Index(b[i], ":"), strings.Index(a[i], ":")
+		if bc < 0 || ac < 0 {
+			return fmt.Errorf("line %d changed outside a key line", i+1)
+		}
+		keyOf := func(s string, c int) string {
+			return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s[:c]), "- "))
+		}
+		switch {
+		case b[i][bc:] == a[i][ac:]: // key rename, value untouched
+			if editDistance(keyOf(b[i], bc), keyOf(a[i], ac)) > 1 {
+				return fmt.Errorf("line %d key changed by more than one edit", i+1)
+			}
+		case b[i][:bc+1] == a[i][:ac+1] && keyOf(b[i], bc) == "kind": // kind value rename
+			if editDistance(strings.TrimSpace(b[i][bc+1:]), strings.TrimSpace(a[i][ac+1:])) > 1 {
+				return fmt.Errorf("line %d kind value changed by more than one edit", i+1)
+			}
+		default:
+			return fmt.Errorf("line %d changed beyond a single token rename", i+1)
+		}
 	}
 	return nil
 }

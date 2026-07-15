@@ -1,0 +1,23 @@
+# Field-typo repair: `Deploymet` (kind value), `contaieners` (extra letter) and
+# `naem` (transposition) are each one edit from exactly one schema name, so they
+# are auto-fixed — and the corrected `containers` key unlocks the marker repair
+# for its dashless item. `metadata.run` has no near match: ObjectMeta's table is
+# complete, so it gets a warn-only diagnostic and is left in place.
+apiVersion: apps/v1
+kind: Deploymet
+metadata:
+  name: web
+  run: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      contaieners:
+        naem: app
+        image: nginx
