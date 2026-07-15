@@ -198,9 +198,11 @@ func placeMKey(stack *[]mframe, key string, orig int) {
 			return // a lost-marker item field: stay for the B sub-case
 		case declares(t.typ, key):
 			return // this scope specifically owns the key
+		case t.typ == "" && !t.isSeq && orig > t.origIndent:
+			return // unknown scope absorbs; see placeKey's humility rule
 		case ancestorDeclaresM(*stack, key):
 			*stack = (*stack)[:len(*stack)-1] // dedent toward the real owner
-		case (t.typ == "" || t.typ == stringMap) && !t.isSeq && orig > t.origIndent:
+		case t.typ == stringMap && !t.isSeq && orig > t.origIndent:
 			return // free-form scope; indentation is the only signal
 		case orig <= t.origIndent:
 			*stack = (*stack)[:len(*stack)-1] // structural dedent
@@ -253,6 +255,10 @@ func pushMScope(stack *[]mframe, parentType, key string, keyOrig int) {
 			f.isSeq = true
 			f.elem = fd.elem
 			f.knownScalarSeq = fd.elem == ""
+		} else if fd.child == "" {
+			// A declared leaf opened a block: schema-contradicted input, treat
+			// as free-form (mirrors reindent's pushChild).
+			f.typ = stringMap
 		} else {
 			f.typ = fd.child
 		}

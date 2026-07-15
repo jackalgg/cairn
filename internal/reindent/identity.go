@@ -34,7 +34,8 @@ import (
 // canonical version is safe for any live cluster.
 var canonicalAPI = map[string]string{
 	"Pod": "v1", "Service": "v1", "ConfigMap": "v1", "Secret": "v1",
-	"Deployment": "apps/v1", "ReplicaSet": "apps/v1",
+	"PersistentVolumeClaim": "v1",
+	"Deployment":            "apps/v1", "ReplicaSet": "apps/v1",
 	"DaemonSet": "apps/v1", "StatefulSet": "apps/v1",
 	"Job": "batch/v1", "CronJob": "batch/v1",
 }

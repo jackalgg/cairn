@@ -34,21 +34,30 @@ var leaf = field{}
 // child, so the reindenter never tries to "dedent out" of one on schema
 // grounds — it falls back to indentation there, which is correct because the
 // keys really are arbitrary.
+//
+// HOUSE RULE: stringMap is ONLY for scopes whose keys are genuinely
+// user-chosen. A scope with real, known fields must get a real type, even a
+// partial one — a stringMap placeholder there lets placeKey's
+// "ancestor-declares beats wildcard" rule steal nested keys (an exec.command
+// dedented out to the container because Container also declares `command`;
+// same for configMapKeyRef.name vs EnvVar's `name`). That bug class corrupts
+// VALID files, so placeholders are never acceptable for typed scopes.
 const stringMap = "StringMap"
 
 // kindType maps a manifest Kind to its root schema type. Kinds not listed fall
 // through to a purely structural (indentation-only) reindent.
 var kindType = map[string]string{
-	"Pod":         "Pod",
-	"Deployment":  "Deployment",
-	"ReplicaSet":  "Deployment", // same spec shape for our purposes
-	"DaemonSet":   "Deployment",
-	"StatefulSet": "Deployment",
-	"Job":         "Job",
-	"CronJob":     "CronJob",
-	"Service":     "Service",
-	"ConfigMap":   "ConfigMap",
-	"Secret":      "ConfigMap",
+	"Pod":                   "Pod",
+	"Deployment":            "Deployment",
+	"ReplicaSet":            "Deployment", // same spec shape for our purposes
+	"DaemonSet":             "Deployment",
+	"StatefulSet":           "StatefulSet", // NOT Deployment: serviceName, volumeClaimTemplates, updateStrategy
+	"Job":                   "Job",
+	"CronJob":               "CronJob",
+	"Service":               "Service",
+	"ConfigMap":             "ConfigMap",
+	"Secret":                "ConfigMap",
+	"PersistentVolumeClaim": "PersistentVolumeClaim",
 }
 
 // schemaTable[type][key] = what that key declares.
@@ -108,12 +117,59 @@ var schemaTable = map[string]map[string]field{
 		"finalizers":                 seqOf(""),
 	},
 
+	"StatefulSet": {
+		"apiVersion": leaf, "kind": leaf,
+		"metadata": mapping("ObjectMeta"),
+		"spec":     mapping("StatefulSetSpec"),
+		"status":   mapping(stringMap),
+	},
+	"StatefulSetSpec": {
+		"replicas": leaf, "serviceName": leaf, "podManagementPolicy": leaf,
+		"revisionHistoryLimit": leaf, "minReadySeconds": leaf,
+		"selector":                             mapping("LabelSelector"),
+		"template":                             mapping("PodTemplateSpec"),
+		"updateStrategy":                       mapping("UpdateStrategy"),
+		"volumeClaimTemplates":                 seqOf("PersistentVolumeClaim"),
+		"persistentVolumeClaimRetentionPolicy": mapping("PVCRetentionPolicy"),
+	},
+	// UpdateStrategy merges StatefulSet/DaemonSet rollingUpdate shapes
+	// (partition/maxUnavailable) — loose but steal-proof.
+	"UpdateStrategy": {
+		"type":          leaf,
+		"rollingUpdate": mapping("RollingUpdate"),
+	},
+	"PVCRetentionPolicy": {
+		"whenDeleted": leaf, "whenScaled": leaf,
+	},
+	"PersistentVolumeClaim": {
+		"apiVersion": leaf, "kind": leaf,
+		"metadata": mapping("ObjectMeta"),
+		"spec":     mapping("PVCSpec"),
+		"status":   mapping(stringMap),
+	},
+	"PVCSpec": {
+		"storageClassName": leaf, "volumeName": leaf, "volumeMode": leaf,
+		"volumeAttributesClassName": leaf,
+		"accessModes":               seqOf(""),
+		"resources":                 mapping("ResourceRequirements"),
+		"selector":                  mapping("LabelSelector"),
+		"dataSource":                mapping(stringMap),
+		"dataSourceRef":             mapping(stringMap),
+	},
 	"DeploymentSpec": {
 		"replicas": leaf, "minReadySeconds": leaf, "paused": leaf,
 		"revisionHistoryLimit": leaf, "progressDeadlineSeconds": leaf,
 		"selector": mapping("LabelSelector"),
-		"strategy": mapping(stringMap),
+		"strategy": mapping("DeploymentStrategy"),
 		"template": mapping("PodTemplateSpec"),
+	},
+	"DeploymentStrategy": {
+		"type":          leaf,
+		"rollingUpdate": mapping("RollingUpdate"),
+	},
+	"RollingUpdate": {
+		"maxSurge": leaf, "maxUnavailable": leaf,
+		"partition": leaf, // StatefulSet variant
 	},
 	"JobSpec": {
 		"parallelism": leaf, "completions": leaf, "backoffLimit": leaf,
@@ -157,18 +213,56 @@ var schemaTable = map[string]map[string]field{
 	"Container": {
 		"name": leaf, "image": leaf, "imagePullPolicy": leaf,
 		"workingDir": leaf, "tty": leaf, "stdin": leaf, "restartPolicy": leaf,
-		"command":        seqOf(""),
-		"args":           seqOf(""),
-		"ports":          seqOf("ContainerPort"),
-		"env":            seqOf("EnvVar"),
-		"envFrom":        seqOf(stringMap),
-		"volumeMounts":   seqOf("VolumeMount"),
-		"resources":      mapping("ResourceRequirements"),
+		"command":         seqOf(""),
+		"args":            seqOf(""),
+		"ports":           seqOf("ContainerPort"),
+		"env":             seqOf("EnvVar"),
+		"envFrom":         seqOf("EnvFromSource"),
+		"volumeMounts":    seqOf("VolumeMount"),
+		"resources":       mapping("ResourceRequirements"),
 		"securityContext": mapping("SecurityContext"),
-		"livenessProbe":  mapping("Probe"),
-		"readinessProbe": mapping("Probe"),
-		"startupProbe":   mapping("Probe"),
-		"lifecycle":      mapping(stringMap),
+		"livenessProbe":   mapping("Probe"),
+		"readinessProbe":  mapping("Probe"),
+		"startupProbe":    mapping("Probe"),
+		"lifecycle":       mapping("Lifecycle"),
+	},
+	"Lifecycle": {
+		"postStart":  mapping("LifecycleHandler"),
+		"preStop":    mapping("LifecycleHandler"),
+		"stopSignal": leaf, // added in k8s 1.33
+	},
+	"LifecycleHandler": {
+		"exec":      mapping("ExecAction"),
+		"httpGet":   mapping("HTTPGetAction"),
+		"tcpSocket": mapping("TCPSocketAction"),
+		"sleep":     mapping("SleepAction"),
+	},
+	"ExecAction": {
+		"command": seqOf(""),
+	},
+	"HTTPGetAction": {
+		"path": leaf, "port": leaf, "host": leaf, "scheme": leaf,
+		"httpHeaders": seqOf("HTTPHeader"),
+	},
+	"HTTPHeader": {
+		"name": leaf, "value": leaf,
+	},
+	"TCPSocketAction": {
+		"port": leaf, "host": leaf,
+	},
+	"GRPCAction": {
+		"port": leaf, "service": leaf,
+	},
+	"SleepAction": {
+		"seconds": leaf,
+	},
+	"EnvFromSource": {
+		"prefix":       leaf,
+		"configMapRef": mapping("LocalObjectReference"),
+		"secretRef":    mapping("LocalObjectReference"),
+	},
+	"LocalObjectReference": {
+		"name": leaf, "optional": leaf,
 	},
 	"ResourceRequirements": {
 		"limits":   mapping(stringMap),
@@ -179,7 +273,22 @@ var schemaTable = map[string]map[string]field{
 	},
 	"EnvVar": {
 		"name": leaf, "value": leaf,
-		"valueFrom": mapping(stringMap),
+		"valueFrom": mapping("EnvVarSource"),
+	},
+	"EnvVarSource": {
+		"fieldRef":         mapping("ObjectFieldSelector"),
+		"resourceFieldRef": mapping("ResourceFieldSelector"),
+		"configMapKeyRef":  mapping("KeySelector"),
+		"secretKeyRef":     mapping("KeySelector"),
+	},
+	"ObjectFieldSelector": {
+		"apiVersion": leaf, "fieldPath": leaf,
+	},
+	"ResourceFieldSelector": {
+		"containerName": leaf, "resource": leaf, "divisor": leaf,
+	},
+	"KeySelector": {
+		"name": leaf, "key": leaf, "optional": leaf,
 	},
 	"VolumeMount": {
 		"name": leaf, "mountPath": leaf, "readOnly": leaf, "subPath": leaf, "subPathExpr": leaf,
@@ -187,41 +296,113 @@ var schemaTable = map[string]map[string]field{
 	"Probe": {
 		"initialDelaySeconds": leaf, "periodSeconds": leaf, "timeoutSeconds": leaf,
 		"successThreshold": leaf, "failureThreshold": leaf,
-		"httpGet":   mapping(stringMap),
-		"exec":      mapping(stringMap),
-		"tcpSocket": mapping(stringMap),
-		"grpc":      mapping(stringMap),
+		"terminationGracePeriodSeconds": leaf,
+		"httpGet":                       mapping("HTTPGetAction"),
+		"exec":                          mapping("ExecAction"),
+		"tcpSocket":                     mapping("TCPSocketAction"),
+		"grpc":                          mapping("GRPCAction"),
 	},
 	"SecurityContext": {
 		"runAsUser": leaf, "runAsGroup": leaf, "runAsNonRoot": leaf,
 		"readOnlyRootFilesystem": leaf, "allowPrivilegeEscalation": leaf,
 		"privileged": leaf, "procMount": leaf,
-		"capabilities":   mapping(stringMap),
-		"seccompProfile": mapping(stringMap),
+		"capabilities":   mapping("Capabilities"),
+		"seccompProfile": mapping("SeccompProfile"),
+	},
+	"Capabilities": {
+		"add": seqOf(""), "drop": seqOf(""),
+	},
+	"SeccompProfile": {
+		"type": leaf, "localhostProfile": leaf,
 	},
 	"PodSecurityContext": {
 		"runAsUser": leaf, "runAsGroup": leaf, "runAsNonRoot": leaf,
 		"fsGroup": leaf, "fsGroupChangePolicy": leaf,
-		"seccompProfile":     mapping(stringMap),
+		"seccompProfile":     mapping("SeccompProfile"),
 		"supplementalGroups": seqOf(""),
 	},
 	"Volume": {
 		"name":                  leaf,
-		"configMap":             mapping(stringMap),
-		"secret":                mapping(stringMap),
-		"emptyDir":              mapping(stringMap),
-		"hostPath":              mapping(stringMap),
-		"persistentVolumeClaim": mapping(stringMap),
-		"projected":             mapping(stringMap),
-		"downwardAPI":           mapping(stringMap),
+		"configMap":             mapping("ConfigMapVolumeSource"),
+		"secret":                mapping("SecretVolumeSource"),
+		"emptyDir":              mapping("EmptyDirVolumeSource"),
+		"hostPath":              mapping("HostPathVolumeSource"),
+		"persistentVolumeClaim": mapping("PVCVolumeSource"),
+		"projected":             mapping("ProjectedVolumeSource"),
+		"downwardAPI":           mapping("DownwardAPIVolumeSource"),
+	},
+	"ConfigMapVolumeSource": {
+		"name": leaf, "defaultMode": leaf, "optional": leaf,
+		"items": seqOf("KeyToPath"),
+	},
+	"SecretVolumeSource": {
+		"secretName": leaf, "defaultMode": leaf, "optional": leaf,
+		"items": seqOf("KeyToPath"),
+	},
+	"KeyToPath": {
+		"key": leaf, "path": leaf, "mode": leaf,
+	},
+	"EmptyDirVolumeSource": {
+		"medium": leaf, "sizeLimit": leaf,
+	},
+	"HostPathVolumeSource": {
+		"path": leaf, "type": leaf,
+	},
+	"PVCVolumeSource": {
+		"claimName": leaf, "readOnly": leaf,
+	},
+	"ProjectedVolumeSource": {
+		"defaultMode": leaf,
+		"sources":     seqOf("VolumeProjection"),
+	},
+	"VolumeProjection": {
+		"configMap":           mapping("ConfigMapProjection"),
+		"secret":              mapping("SecretProjection"),
+		"serviceAccountToken": mapping("ServiceAccountTokenProjection"),
+		"downwardAPI":         mapping("DownwardAPIVolumeSource"),
+		"clusterTrustBundle":  mapping(stringMap),
+	},
+	"ConfigMapProjection": {
+		"name": leaf, "optional": leaf,
+		"items": seqOf("KeyToPath"),
+	},
+	"SecretProjection": {
+		"name": leaf, "optional": leaf,
+		"items": seqOf("KeyToPath"),
+	},
+	"ServiceAccountTokenProjection": {
+		"path": leaf, "expirationSeconds": leaf, "audience": leaf,
+	},
+	"DownwardAPIVolumeSource": {
+		"defaultMode": leaf,
+		"items":       seqOf("DownwardAPIVolumeFile"),
+	},
+	"DownwardAPIVolumeFile": {
+		"path": leaf, "mode": leaf,
+		"fieldRef":         mapping("ObjectFieldSelector"),
+		"resourceFieldRef": mapping("ResourceFieldSelector"),
 	},
 	"ServiceSpec": {
 		// clusterIPs must be listed: it is a real field one edit from
 		// clusterIP, and the typo pass would otherwise "fix" it.
 		"type": leaf, "clusterIP": leaf, "clusterIPs": seqOf(""), "externalName": leaf,
 		"sessionAffinity": leaf, "externalTrafficPolicy": leaf, "loadBalancerIP": leaf,
-		"selector": mapping(stringMap),
-		"ports":    seqOf("ServicePort"),
+		"internalTrafficPolicy": leaf, "ipFamilyPolicy": leaf,
+		"allocateLoadBalancerNodePorts": leaf, "healthCheckNodePort": leaf,
+		"publishNotReadyAddresses": leaf, "loadBalancerClass": leaf,
+		"trafficDistribution":      leaf,
+		"ipFamilies":               seqOf(""),
+		"externalIPs":              seqOf(""),
+		"loadBalancerSourceRanges": seqOf(""),
+		"sessionAffinityConfig":    mapping("SessionAffinityConfig"),
+		"selector":                 mapping(stringMap),
+		"ports":                    seqOf("ServicePort"),
+	},
+	"SessionAffinityConfig": {
+		"clientIP": mapping("ClientIPConfig"),
+	},
+	"ClientIPConfig": {
+		"timeoutSeconds": leaf,
 	},
 	"ServicePort": {
 		"name": leaf, "port": leaf, "targetPort": leaf, "protocol": leaf, "nodePort": leaf,

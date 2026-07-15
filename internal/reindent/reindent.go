@@ -97,6 +97,20 @@ func reindentDoc(lines []string) []string {
 
 		if content == "-" || strings.HasPrefix(content, "- ") {
 			out = append(out, emitListItem(&stack, orig, content))
+			// A block-scalar item (`- |`) or an inline key holding one
+			// (`- script: |`): copy the body verbatim (shifted with its
+			// header) so script lines are never re-placed as keys/scalars —
+			// that flattened nested script indentation.
+			inline := strings.TrimSpace(strings.TrimPrefix(content, "-"))
+			blockItem := isBlockScalar(inline)
+			if !blockItem {
+				if _, v, ok := splitKeyValue(inline); ok && isBlockScalar(v) {
+					blockItem = true
+				}
+			}
+			if blockItem {
+				out = append(out, consumeBlockScalar(lines, &i, orig, top(stack).col)...)
+			}
 			continue
 		}
 
@@ -132,6 +146,16 @@ func placeKey(stack *[]frame, key string, orig int) int {
 		case declares(t.typ, key):
 			// This scope specifically owns the key: it stays here.
 			return t.childCol
+		case t.typ == "" && !t.isSeq && orig > t.origIndent:
+			// UNKNOWN scope (unmodeled field, CRD subtree — e.g. a StatefulSet's
+			// volumeClaimTemplates before it was modeled): the schema has no
+			// claim here, so a deeper-indented key belongs to it. Never let an
+			// ancestor steal keys out through a scope we know nothing about —
+			// that is how a nested PVC's kind/metadata/spec got dedented to
+			// column 0 and merged two documents. stringMap scopes are different:
+			// there the schema POSITIVELY says values are flat user data, so the
+			// ancestor rule below may still recover a real field from them.
+			return t.childCol
 		case ancestorDeclares(*stack, key):
 			// A specific ancestor owns the key: dedent toward it. This beats
 			// wildcard absorption so a real field that was over-indented into a
@@ -165,6 +189,11 @@ func pushChild(stack *[]frame, parentType, key string, col, orig int) {
 			f.isSeq = true
 			f.elem = fd.elem
 			f.childCol = col
+		} else if fd.child == "" {
+			// A declared LEAF opened a block: the input contradicts the schema,
+			// so treat the block as free-form rather than unknown — that keeps
+			// ancestor recovery available for whatever was mis-indented here.
+			f.typ = stringMap
 		} else {
 			f.typ = fd.child
 		}
@@ -223,9 +252,12 @@ func emitListItem(stack *[]frame, orig int, content string) string {
 	}
 
 	// If the inline content is itself a key that opens a block, register it so
-	// following lines nest correctly.
+	// following lines nest correctly. Its original indent is orig+2 — past the
+	// "- " marker — NOT orig: with orig, an item field written at the same
+	// depth as the inline key (`weight:` next to `- podAffinityTerm:`) reads
+	// as "deeper than the scope" and gets wrongly absorbed into it.
 	if key, value, ok := splitKeyValue(inline); ok && value == "" && !isBlockScalar(value) {
-		pushChild(stack, item.typ, key, markerCol+2, orig)
+		pushChild(stack, item.typ, key, markerCol+2, orig+2)
 	}
 	return indent(markerCol) + "- " + inline
 }

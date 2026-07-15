@@ -15,9 +15,14 @@ package reindent
 // other and never share state; they compose only through their bytes.
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"reflect"
 	"regexp"
 	"strings"
+
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // Diagnostic is a human-readable notice produced while fixing: a repair that
@@ -61,6 +66,14 @@ func wrap(f func([]byte) ([]byte, bool)) func([]byte) ([]byte, bool, []Diagnosti
 
 // Fix runs the full repair pipeline over data and returns the repaired bytes,
 // whether anything changed, and the diagnostics gathered along the way.
+//
+// A whole-pipeline gate keeps cairn honest on files that already work: when
+// the INPUT parses, the output must parse to a DIFFERENT document tree to be
+// worth keeping. Equal trees mean the passes only renormalized style (indent
+// width, colon gaps, trailing blanks) — a repair tool has no business
+// rewriting a working file, so the input is returned unchanged. And if the
+// output no longer parses at all, every edit is discarded: cairn must never
+// turn a parseable file into a broken one.
 func Fix(data []byte) (out []byte, changed bool, diags []Diagnostic) {
 	out = data
 	for _, p := range pipeline {
@@ -77,7 +90,38 @@ func Fix(data []byte) (out []byte, changed bool, diags []Diagnostic) {
 		out, changed = next, true
 		diags = append(diags, ds...)
 	}
+
+	if changed {
+		if inDocs, inOK := parseDocs(data); inOK {
+			outDocs, outOK := parseDocs(out)
+			switch {
+			case !outOK:
+				diags = append(diags, Diagnostic{Msg: "internal: repair would corrupt a parseable file; all changes were discarded"})
+				return data, false, diags
+			case reflect.DeepEqual(inDocs, outDocs):
+				return data, false, diags // style-only: keep the file as written
+			}
+		}
+	}
 	return out, changed, diags
+}
+
+// parseDocs decodes every YAML document in data, reporting ok=false when any
+// document fails to parse (including duplicate-key errors).
+func parseDocs(data []byte) ([]interface{}, bool) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	var docs []interface{}
+	for {
+		var v interface{}
+		err := dec.Decode(&v)
+		if err == io.EOF {
+			return docs, true
+		}
+		if err != nil {
+			return nil, false
+		}
+		docs = append(docs, v)
+	}
 }
 
 // --- verifiers ---------------------------------------------------------------
